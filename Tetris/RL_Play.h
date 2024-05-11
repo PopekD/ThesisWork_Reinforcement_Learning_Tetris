@@ -38,6 +38,8 @@ private:
 	int prevAggregateHeight;
 	int prevNextCount;
 
+
+	bool first;
 	bool landed;
 	int action;
 	int frame = 0;

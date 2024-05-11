@@ -6,6 +6,8 @@
 #include "DQN.h"
 #include "RL_Play.h"
 #include "random"
+#include <fstream>
+
 
 class Train {
 
@@ -25,15 +27,16 @@ private:
 
 	torch::Device device;
 	ExperienceReplayMemory buffer;
-	std::shared_ptr<DQN> policy_net;
-	std::shared_ptr<DQN> target_net;
+
+	DQN policy_net;
+	DQN target_net;
 
 	uint64_t num_steps;
 	int steps_done = 0;
 	float n_updates = 0;
 	float eps_threshold;
 
-	std::shared_ptr<torch::optim::Adam> dqn_optimizer;
+	torch::optim::Adam dqn_optimizer;
 	torch::nn::SmoothL1Loss criterion;
 	torch::Tensor loss;
 	std::vector<float> losses;
@@ -51,22 +54,21 @@ private:
 
 public:
 	Train(size_t input_channels, size_t num_actions, size_t capacity, uint64_t num_steps,
-		const size_t BATCH_SIZE = 64,
+		const size_t BATCH_SIZE = 32,
 		const float GAMMA = 0.99f,
 		const float EPS_START = 1.0f,
 		const float EPS_END = 0.05f,
-		const size_t EPS_DECAY = 30000,
-		const float TAU = 1.0f,
+		const size_t EPS_DECAY = 150000,
 		const float LR = 0.0001f,
-		const float OFFSET = 0.00001f,
-		const float A = 0.6f,
-		const float BETA = 0.4f,
-		const float BETA_INCREMENT = 0.0000006,
+		const float OFFSET = 0.000001f,
+		const float A = 0.4f,
+		const float BETA = 0.1f,
+		const float BETA_INCREMENT = 0.00000009,
 		const size_t TRAIN_START_STP = 100,
 		const size_t UPDATE_TARGET_STP = 10000,
 		const size_t TRAIN_EVERY_STP = 4,
 		const uint8_t FRAME_SKIP = 4
-		) :
+	) :
 		BATCH_SIZE(BATCH_SIZE), GAMMA(GAMMA), EPS_START(EPS_START), EPS_END(EPS_END), EPS_DECAY(EPS_DECAY), TAU(TAU), LR(LR), OFFSET(OFFSET), TRAIN_START_STP(TRAIN_START_STP), UPDATE_TARGET_STP(UPDATE_TARGET_STP), TRAIN_EVERY_STP(TRAIN_EVERY_STP), FRAME_SKIP(FRAME_SKIP),
 		device(torch::kCUDA),
 		buffer(capacity, BETA, BETA_INCREMENT, A),
@@ -74,12 +76,12 @@ public:
 		num_actions(num_actions),
 		eps_threshold(TAU),
 		gen(rd()),
-		policy_net(std::make_shared<DQN>(input_channels, num_actions)),
-		target_net(std::make_shared<DQN>(input_channels, num_actions)),
+		policy_net(DQN(input_channels, num_actions)),
+		target_net(DQN(input_channels, num_actions)),
+		dqn_optimizer(policy_net->parameters(), torch::optim::AdamOptions(LR)),
 		criterion(torch::nn::SmoothL1LossOptions().reduction(torch::kNone).beta(1.0f)) {
 		policy_net->to(device);
 		target_net->to(device);
-		dqn_optimizer = std::make_shared<torch::optim::Adam>(policy_net->parameters(), torch::optim::AdamOptions(LR));
 		load_state_dict();
 
 	}
@@ -138,11 +140,16 @@ public:
 
 		losses.push_back(loss.item<float>());
 
-		dqn_optimizer->zero_grad();
+		policy_net->zero_grad();
 
 		loss.backward();
 
-		dqn_optimizer->step();
+		torch::nn::utils::clip_grad_norm_(policy_net->parameters(), 10);
+
+		dqn_optimizer.step();
+
+		//policy_net->reset_noise();
+		//target_net->reset_noise();
 
 
 	};
@@ -178,8 +185,8 @@ public:
 
 		RL_Play env;
 		torch::Tensor action;
-		int frame = 0;
 		float cum_reward = 0;
+		int frame = 0;
 
 		for (uint64_t i = 0; ; i++)
 		{
@@ -193,30 +200,14 @@ public:
 
 			start = std::chrono::system_clock::now();
 
-			frame = 0;
-			
+
 			for (uint64_t t = 0; ; t++) {
-				
 
-				if ( frame % FRAME_SKIP == 0 ) { action = selectAction(state); }
-				
-				//if ( steps_done < 10001)
-				//{ 
-				//	int e = 99;
-
-				//	while(e == 99)
-				//	{
-				//		//std::cout << e << std::endl;
-				//		e = env.init_play();
-				//	}
-
-				//	action = torch::tensor({ { e } }, torch::kLong).to(device); Fs
-				//	steps_done++;
-				//}
+				if (frame % FRAME_SKIP == 0) { action = selectAction(state); }
 
 				std::tuple<torch::Tensor, float, bool, bool> step_result;
 
-				step_result = env.step(action.item<int>(), frame % FRAME_SKIP != 0); 
+				step_result = env.step(action.item<int>(), frame % FRAME_SKIP != 0);
 
 				bool done = std::get<2>(step_result);
 				bool scored = std::get<3>(step_result);
@@ -227,9 +218,8 @@ public:
 
 				if (frame % FRAME_SKIP == 0)
 				{
-					//if (scored) { frame = 0; }
-					torch::Tensor observation = std::get<0>(step_result);
 
+					torch::Tensor observation = std::get<0>(step_result);
 					torch::Tensor reward_tensor = torch::tensor({ cum_reward }, device);
 					torch::Tensor done_tensor = torch::tensor({ done });
 
@@ -244,10 +234,10 @@ public:
 					cum_reward = 0.f;
 
 					state = observation;
-					
+
 				}
 
-				if (steps_done > TRAIN_START_STP && steps_done % TRAIN_EVERY_STP == 0) { optimize_model(); }
+				if (steps_done > TRAIN_START_STP && frame % TRAIN_EVERY_STP == 0) { optimize_model(); }
 
 				if (steps_done % UPDATE_TARGET_STP == 0) { load_state_dict(); }
 
@@ -267,10 +257,11 @@ public:
 			std::cout << "Epsilon Value: " << eps_threshold << std::endl;
 			std::cout << std::endl;
 
+			appendToLogFile("training_log.txt", i, steps_done, episode_reward, elapsed_seconds.count(), mean(), eps_threshold);
 
 		}
 		torch::save(policy_net, "model.pt");
-		//torch::save(dqn_optimizer, "optim.pt");
+		torch::save(dqn_optimizer, "optim.pt");
 
 		std::cout << "COMPLITED";
 
@@ -299,24 +290,49 @@ public:
 
 	void load_state_dict()
 	{
-		std::stringstream stream;
-		torch::save(policy_net, stream);
-		torch::load(target_net, stream);
-	}
+		torch::NoGradGuard no_grad;
 
-	void update_target()
-	{
-		std::stringstream stream;
-		torch::save(policy_net, stream);
-		torch::load(target_net, stream);
+		auto new_params = target_net->named_parameters();
+		auto params = policy_net->named_parameters(true);
+		auto buffers = policy_net->named_buffers(true);
+
+		for (auto& val : new_params) {
+			auto name = val.key();
+			auto* t = params.find(name);
+			if (t != nullptr) {
+				t->copy_(val.value());
+			}
+			else {
+				t = buffers.find(name);
+				if (t != nullptr) {
+					t->copy_(val.value());
+				}
+			}
+		}
 	}
 
 	double mean()
 	{
 		double sum = std::accumulate(losses.begin(), losses.end(), 0.0f);
-
 		return sum / losses.size();
+	}
 
+	void appendToLogFile(const std::string& filename, int episode_number, int steps_done, float episode_reward, int episode_length, float mean_loss, float epsilon_value) {
+		std::ofstream file;
+		file.open(filename, std::ios_base::app); 
+		if (file.is_open()) {
+			file << "Episodes Number: " << episode_number << std::endl;
+			file << "Overall Steps Done: " << steps_done << std::endl;
+			file << "Episode Reward: " << episode_reward << std::endl;
+			file << "Episode Length: " << episode_length << std::endl;
+			file << "Mean Loss: " << mean_loss << std::endl;
+			file << "Epsilon Value: " << epsilon_value << std::endl;
+			file << std::endl;
+			file.close();
+		}
+		else {
+			std::cerr << "Unable to open file for appending!" << std::endl;
+		}
 	}
 
 };

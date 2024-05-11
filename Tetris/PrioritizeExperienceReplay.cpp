@@ -30,12 +30,14 @@ std::tuple<std::vector<Transition>, std::vector<size_t>, std::vector<float>> Exp
     beta = std::min(1.0f, beta + beta_increment);
 
     for (uint16_t i = 0; i < batch_size; i++) {
+
         size_t index = dist(gen);
         batch[i] = memory[index];
         indices[i] = index;
         weights[i] = std::pow(batch_size * probabilities[index] , -beta);
         max_weight = std::max(max_weight, weights[i]);
     }
+
 
     for (float& element : weights) { element /= max_weight; }
 

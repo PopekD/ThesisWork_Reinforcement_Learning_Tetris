@@ -5,7 +5,7 @@ RL_Play::RL_Play()
 {
 	srand(time(0));
 	window.create(sf::VideoMode(2 * WINDOW_WIDTH, WINDOW_HEIGHT), "Tetris", sf::Style::Default);
-
+	first = true;
 	for (int i = 0; i < 4; ++i) {
 		torch::Tensor empty_frame = torch::zeros({ 84,84, 1 }, torch::kFloat);
 		empty_frame = empty_frame.to(torch::kCUDA);
@@ -35,7 +35,7 @@ torch::Tensor RL_Play::restart()
 
 
 	MOVE_INTERVAL = 1.0f;
-	lockTime = 0.06f;
+	lockTime = 0.1f;
 
 	tile.resetMap();
 	tile.resetHoles();
@@ -101,7 +101,7 @@ std::tuple<torch::Tensor, float, bool, bool> RL_Play::step(int event, bool skipp
 	}
 
 
-	if ( hardDrop || !tetromino->checkCollisions(colorMap)) {
+	if (hardDrop || !tetromino->checkCollisions(colorMap)) {
 
 		hit = true;
 		elapsedSecondsLock += deltaTime;
@@ -157,104 +157,109 @@ std::tuple<torch::Tensor, float, bool, bool> RL_Play::step(int event, bool skipp
 
 void RL_Play::play()
 {
-	colorMap = tile.getColorMap();
-	bool hardDrop = false;
-	bool moved = false;
-	tetromino->isDownPressed(false);
-
-	float deltaTime = moveClock.restart().asSeconds();
-	elapsedSeconds += deltaTime;
-	elapsedSecondsKey += deltaTime;
-
-	sf::Event event;
-	while (window.pollEvent(event))
+	restart();
+	for (; ; )
 	{
-		if (event.type == sf::Event::Closed)
-			window.close();
-		if (event.type == sf::Event::KeyPressed)
+
+		colorMap = tile.getColorMap();
+		bool hardDrop = false;
+		bool moved = false;
+		tetromino->isDownPressed(false);
+
+		float deltaTime = moveClock.restart().asSeconds();
+		elapsedSeconds += deltaTime;
+		elapsedSecondsKey += deltaTime;
+
+		sf::Event event;
+		while (window.pollEvent(event))
 		{
-			switch (event.key.code)
+			if (event.type == sf::Event::Closed)
+				window.close();
+			if (event.type == sf::Event::KeyPressed)
 			{
-			case(sf::Keyboard::C):
-				tetromino->rotate(colorMap, event.key.code);
-				break;
-			case(sf::Keyboard::X):
-				tetromino->rotate(colorMap, event.key.code);
-				break;
-			case(sf::Keyboard::LControl):
-				tetromino->swapTetrominos(tetromino, game.tetrominoQueue);
-				break;
-			case(sf::Keyboard::Space):
-				moved = true;
-				while (moved) {
-					moved = tetromino->moveDown(colorMap);
+				switch (event.key.code)
+				{
+				case(sf::Keyboard::C):
+					tetromino->rotate(colorMap, event.key.code);
+					break;
+				case(sf::Keyboard::X):
+					tetromino->rotate(colorMap, event.key.code);
+					break;
+				case(sf::Keyboard::LControl):
+					tetromino->swapTetrominos(tetromino, game.tetrominoQueue);
+					break;
+				case(sf::Keyboard::Space):
+					moved = true;
+					while (moved) {
+						moved = tetromino->moveDown(colorMap);
+					}
+					hardDrop = true;
+					break;
 				}
-				hardDrop = true;
-				break;
 			}
 		}
-	}
 
-	if (elapsedSecondsKey >= 1.0f / 15.0f)
-	{
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+		if (elapsedSecondsKey >= 1.0f / 15.0f)
 		{
-			tetromino->moveDown(colorMap);
-		}
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
-		{
-			tetromino->moveRight(colorMap);
-		}
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
-		{
-			tetromino->moveLeft(colorMap);
-		}
-		elapsedSecondsKey -= 1.0f / 15.0f;
-	}
-
-	if (hardDrop || !tetromino->checkCollisions(colorMap)) {
-
-		hit = true;
-		elapsedSecondsLock += deltaTime;
-
-		if (elapsedSecondsLock >= lockTime)
-		{
-
-			std::vector<std::vector<int>> shape = tetromino->getShape();
-			int posX = tetromino->getPosX();
-			int posY = tetromino->getPosY();
-			color = tetromino->getColor();
-
-			tile.updateMap(shape, posX, posY, color);
-			tetromino.reset(new Figures(Tetrominos[nextTetromino]));
-			tetromino->didCtrlClick = false;
-
-			MOVE_INTERVAL = tile.getSpeed();
-
-			nextTetromino = game.tetrominoQueue.front();
-			game.tetrominoQueue.pop();
-
-			if (game.tetrominoQueue.empty()) {
-				game.refillTetrominoQueue();
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+			{
+				tetromino->moveDown(colorMap);
 			}
-
-			elapsedSecondsLock -= lockTime;
-
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+			{
+				tetromino->moveRight(colorMap);
+			}
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+			{
+				tetromino->moveLeft(colorMap);
+			}
+			elapsedSecondsKey -= 1.0f / 15.0f;
 		}
-	}
-	else
-	{
-		hit = false;
-		elapsedSecondsLock = 0.0f;
-	}
-	if (elapsedSeconds >= MOVE_INTERVAL) {
-		tetromino->moveDown(tile.getColorMap());
-		elapsedSeconds -= MOVE_INTERVAL;
-	}
 
-	render();
-	if (isGameOver) { restart(); }
-	window.display();
+		if (hardDrop || !tetromino->checkCollisions(colorMap)) {
+
+			hit = true;
+			elapsedSecondsLock += deltaTime;
+
+			if (elapsedSecondsLock >= lockTime)
+			{
+
+				std::vector<std::vector<int>> shape = tetromino->getShape();
+				int posX = tetromino->getPosX();
+				int posY = tetromino->getPosY();
+				color = tetromino->getColor();
+
+				tile.updateMap(shape, posX, posY, color);
+				tetromino.reset(new Figures(Tetrominos[nextTetromino]));
+				tetromino->didCtrlClick = false;
+
+				MOVE_INTERVAL = tile.getSpeed();
+
+				nextTetromino = game.tetrominoQueue.front();
+				game.tetrominoQueue.pop();
+
+				if (game.tetrominoQueue.empty()) {
+					game.refillTetrominoQueue();
+				}
+
+				elapsedSecondsLock -= lockTime;
+
+			}
+		}
+		else
+		{
+			hit = false;
+			elapsedSecondsLock = 0.0f;
+		}
+		if (elapsedSeconds >= MOVE_INTERVAL) {
+			tetromino->moveDown(tile.getColorMap());
+			elapsedSeconds -= MOVE_INTERVAL;
+		}
+
+		render();
+		if (isGameOver) { restart(); }
+		window.display();
+	}
 }
 
 sf::Image RL_Play::render()
@@ -272,23 +277,21 @@ sf::Image RL_Play::render()
 
 torch::Tensor RL_Play::getObservation(sf::Image windowImg, char reset, bool skipped)
 {
-	
+
 	cv::Mat img = cv::Mat(windowImg.getSize().y, windowImg.getSize().x, CV_8UC4, const_cast<sf::Uint8*>(windowImg.getPixelsPtr()));
 
 	cv::cvtColor(img, img, cv::COLOR_RGBA2GRAY);
 
 	cv::resize(img, img, cv::Size(84, 84), cv::INTER_AREA);
 
-	torch::Tensor observation = torch::from_blob(img.data, {img.rows, img.cols, 1}, at::kByte);
+	torch::Tensor observation = torch::from_blob(img.data, { img.rows, img.cols, 1 }, at::kByte);
 
-	if ( !isGameOver && reset == 'n')
+	if (!isGameOver && reset == 'n')
 	{
 		observation = prevObs;
 	}
 
 	prevObs = observation;
-
-	//if ( skipped && !isGameOver && !scored) { return torch::zeros({0}); }
 
 	if (skipped) { return torch::zeros({ 0 }); }
 
@@ -296,12 +299,11 @@ torch::Tensor RL_Play::getObservation(sf::Image windowImg, char reset, bool skip
 	observation = observation.to(torch::kCUDA);
 	observation = observation / 255.f;
 
-	
 	framestack.pop_front();
 
 	framestack.push_back(observation);
 
-	if (reset == 'y') { for (int i = 0; i < 4; ++i) { framestack[i] = observation; } }
+	if (first && reset == 'y') { for (int i = 0; i < 4; ++i) { framestack[i] = observation; } first = false; }
 
 	std::vector<torch::Tensor> frame_tensors(framestack.begin(), framestack.end());
 
@@ -328,22 +330,15 @@ std::tuple<float, bool> RL_Play::judge(const int& action)
 
 	if (isGameOver) { reward = -1.f;  done = true; return std::make_tuple(reward, done); }
 
-	if (game.getScore() == 2000) {reward = 2000.f; done = true; return std::make_tuple(reward, done);}
+	if (game.getScore() == 2000) { reward = 1000.f; done = true; return std::make_tuple(reward, done); }
 
-	if (gapCount < prevGapCount) { reward += 20; }
-	if (nextCount < prevNextCount && holes <= prevholes) { reward += 10; }
-	reward += std::pow(score, 2) * 0.02;
+	if (gapCount < prevGapCount) { reward += 0.60; }
+	if (nextCount < prevNextCount && holes <= prevholes && gapCount <= prevGapCount) { reward += 0.25; }
+	if (bumpiness > prevBumpiness) { reward -= 0.3; }
+	if (height > 4 && height > prevheight) { reward -= 0.1; }
+	if (holes > prevholes) { reward -= 0.6; }
 
-	reward -= 0.01f * bumpiness;
-	reward -= height * 0.005;
-	reward -= holes * 0.01f;
-	//reward -= aggregateHeight * 0.0001;
-
-	if (score > prevscore) { reward = std::pow(score - prevscore, 2) * 1000; }
-
-	//reward -= aggregateHeight * 0.005;
-	//reward -= 0.01f * (holes - 1);
-	//reward -= gapCount * 0.03;
+	if (score > prevscore) { reward = std::pow(score - prevscore, 2) * 100; scored = true; }
 
 	prevscore = score;
 	prevholes = holes;
