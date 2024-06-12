@@ -26,8 +26,10 @@ To run the project, follow these steps:
 
 1. Clone the repository
 2. Install the required dependencies (SFML, Libtorch, OpenCV).
-3. Build the project using your preferred C++ build system.
-4. Run the compiled executable.
+5. Build the project using your preferred C++ build system.
+6. Run the compiled executable.
+
+To enable free play mode, uncomment the commented lines in the `main.cpp` file, comment the uncommented ones, and change the value to `1` in the `Player.h` file.
 
 ## Contributing
 
