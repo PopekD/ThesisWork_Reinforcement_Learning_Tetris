@@ -1,3 +1,3 @@
 #pragma once
 
-#define PLAYER 1
+#define PLAYER 2
