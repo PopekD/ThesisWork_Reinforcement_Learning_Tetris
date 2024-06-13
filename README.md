@@ -31,10 +31,6 @@ To run the project, follow these steps:
 
 To enable free play mode, uncomment the commented lines in the `main.cpp` file, comment the uncommented ones, and change the value to `1` in the `Player.h` file.
 
-## Contributing
-
-Contributions are welcome! If you find any issues or have suggestions for improvements, please open an issue or submit a pull request.
-
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
